@@ -48,7 +48,7 @@ export default async function handler(req, res) {
   }
 
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${req.headers.origin || ''}/login`,
+    redirectTo: `${req.headers.origin || ''}/reset-password`,
   });
   if (error) {
     return res.status(400).json({ error: error.message });
