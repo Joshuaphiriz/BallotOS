@@ -180,3 +180,133 @@ const entities = {
 
 // ---------------------------------------------------------------------------
 // auth.* — Supabase Auth (email/password)
+// ---------------------------------------------------------------------------
+
+async function me() {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) throw error || new Error('Not authenticated');
+  const { data: profile, error: profileError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', user.id)
+    .single();
+  if (profileError) throw profileError;
+  return { id: user.id, email: user.email, ...profile };
+}
+
+const auth = {
+  me,
+
+  async isAuthenticated() {
+    const { data } = await supabase.auth.getSession();
+    return !!data?.session;
+  },
+
+  async loginViaEmailPassword(email, password) {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data;
+  },
+
+  async register({ email, password, full_name }) {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: full_name ? { data: { full_name } } : undefined,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async logout(redirectTo = '/login') {
+    await supabase.auth.signOut();
+    if (redirectTo) window.location.href = redirectTo;
+  },
+
+  redirectToLogin(returnTo) {
+    window.location.href = returnTo
+      ? `/login?returnTo=${encodeURIComponent(returnTo)}`
+      : '/login';
+  },
+
+  async resetPasswordRequest(email) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw error;
+    return true;
+  },
+
+  // Called on the reset-password page once Supabase has established a
+  // recovery session from the emailed link.
+  async resetPassword({ newPassword }) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    return true;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// integrations.Core.UploadFile — Supabase Storage
+// ---------------------------------------------------------------------------
+
+const integrations = {
+  Core: {
+    async UploadFile({ file }) {
+      const ext = file.name.split('.').pop();
+      const path = `${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage.from('ballotos-media').upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+      if (error) throw error;
+      const { data } = supabase.storage.from('ballotos-media').getPublicUrl(path);
+      return { file_url: data.publicUrl };
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// users.inviteUser / users.deleteUser — admin-only actions requiring the
+// Supabase service role key, which lives only in these two Vercel serverless
+// functions (never sent to the browser).
+// ---------------------------------------------------------------------------
+
+const users = {
+  async inviteUser(email, platformRole = 'user') {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/invite-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token || ''}`,
+      },
+      body: JSON.stringify({ email, platformRole }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Failed to invite user');
+    }
+    return res.json();
+  },
+
+  // Fully removes a user (auth account + profile), not just the profile row.
+  async deleteUser(userId) {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/delete-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token || ''}`,
+      },
+      body: JSON.stringify({ userId }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Failed to remove user');
+    }
+    return res.json();
+  },
+};
+
+export const base44 = { entities, auth, integrations, users };
