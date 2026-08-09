@@ -289,6 +289,22 @@ const users = {
     }
     return res.json();
   },
-};
 
-export const base44 = { entities, auth, integrations, users };
+  // Fully removes a user (auth account + profile), not just the profile row.
+  async deleteUser(userId) {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch('/api/delete-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token || ''}`,
+      },
+      body: JSON.stringify({ userId }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Failed to remove user');
+    }
+    return res.json();
+  },
+};

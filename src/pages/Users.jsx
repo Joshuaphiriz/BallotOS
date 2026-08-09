@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
+import { useAuth } from '@/lib/AuthContext';
 import PageHeader from '@/components/ems/PageHeader';
 import Loader from '@/components/ems/Loader';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,7 @@ export default function Users() {
   const [inviteRole, setInviteRole] = useState('admin');
   const [inviting, setInviting] = useState(false);
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
 
   const load = async () => setUsers(await base44.entities.User.list('-created_date', 200));
   useEffect(() => { load(); }, []);
@@ -37,15 +39,19 @@ export default function Users() {
   };
 
   const setRole = async (u, ems_role) => {
-    await base44.entities.User.update(u.id, { ems_role });
-    toast({ title: 'Role updated', description: `${u.full_name || u.email} → ${ROLES[ems_role]}` });
-    load();
+    try {
+      await base44.entities.User.update(u.id, { ems_role });
+      toast({ title: 'Role updated', description: `${u.full_name || u.email} → ${ROLES[ems_role]}` });
+      load();
+    } catch (err) {
+      toast({ title: 'Could not update role', description: err?.message || 'Try again', variant: 'destructive' });
+    }
   };
 
   const removeUser = async (u) => {
     if (!window.confirm(`Remove ${u.full_name || u.email}? This will revoke their access.`)) return;
     try {
-      await base44.entities.User.delete(u.id);
+      await base44.users.deleteUser(u.id);
       toast({ title: 'User removed', description: u.email });
       load();
     } catch (err) {
@@ -72,21 +78,24 @@ export default function Users() {
             <tr>{['Name', 'Email', 'System Role', ''].map(h => <th key={h} className="text-left px-5 py-3 font-medium text-slate-600 dark:text-slate-400">{h}</th>)}</tr>
           </thead>
           <tbody>
-            {users.map(u => (
+            {users.map(u => {
+              const isSelf = currentUser?.id === u.id;
+              return (
               <tr key={u.id} className="border-t border-slate-100 dark:border-slate-800">
-                <td className="px-5 py-3 text-slate-900 dark:text-white">{u.full_name || '—'}</td>
+                <td className="px-5 py-3 text-slate-900 dark:text-white">{u.full_name || '—'}{isSelf && <span className="ml-2 text-xs text-slate-400">(you)</span>}</td>
                 <td className="px-5 py-3 text-slate-500">{u.email}</td>
                 <td className="px-5 py-3">
-                  <Select value={u.ems_role || 'admin'} onValueChange={v => setRole(u, v)}>
+                  <Select value={u.ems_role || 'admin'} onValueChange={v => setRole(u, v)} disabled={isSelf}>
                     <SelectTrigger className="rounded-lg w-56 h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>{Object.entries(ROLES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                   </Select>
                 </td>
                 <td className="px-5 py-3">
-                  <Button variant="ghost" size="icon" className="rounded-lg text-slate-400 hover:text-red-600" onClick={() => removeUser(u)}><Trash2 className="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="icon" className="rounded-lg text-slate-400 hover:text-red-600 disabled:opacity-30 disabled:hover:text-slate-400" disabled={isSelf} onClick={() => removeUser(u)}><Trash2 className="h-4 w-4" /></Button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
