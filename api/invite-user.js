@@ -9,6 +9,17 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export default async function handler(req, res) {
+  // The desktop (Electron) app loads from file:// and calls this endpoint
+  // as a cross-origin request — allow it explicitly (no cookies/credentials
+  // are used, the caller's session token is passed via the Authorization
+  // header instead, so a wildcard origin is safe here).
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
@@ -48,7 +59,7 @@ export default async function handler(req, res) {
   }
 
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${req.headers.origin || ''}/reset-password`,
+    redirectTo: `${req.headers.origin || ''}/login`,
   });
   if (error) {
     return res.status(400).json({ error: error.message });

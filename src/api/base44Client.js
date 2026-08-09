@@ -270,12 +270,19 @@ const integrations = {
 // users.inviteUser / users.deleteUser — admin-only actions requiring the
 // Supabase service role key, which lives only in these two Vercel serverless
 // functions (never sent to the browser).
+//
+// These use an ABSOLUTE url, not a relative one: the website can resolve
+// "/api/..." fine on its own, but the Electron desktop app loads its files
+// from file:// — a relative path there resolves to nowhere. VITE_API_BASE_URL
+// (your deployed Vercel URL) makes both work identically.
 // ---------------------------------------------------------------------------
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 const users = {
   async inviteUser(email, platformRole = 'user') {
     const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch('/api/invite-user', {
+    const res = await fetch(`${API_BASE}/api/invite-user`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -293,7 +300,7 @@ const users = {
   // Fully removes a user (auth account + profile), not just the profile row.
   async deleteUser(userId) {
     const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch('/api/delete-user', {
+    const res = await fetch(`${API_BASE}/api/delete-user`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
