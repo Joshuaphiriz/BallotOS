@@ -26,6 +26,7 @@ export default function PublicVote() {
   const [stage, setStage] = useState('entry'); // entry | ballot | success
   const [number, setNumber] = useState('');
   const [turnstileToken, setTurnstileToken] = useState(null);
+  const [voteToken, setVoteToken] = useState(null); // separate token — Turnstile tokens are single-use
   const [checking, setChecking] = useState(false);
   const [eligibility, setEligibility] = useState(null); // { status, student? }
   const [student, setStudent] = useState(null);
@@ -46,7 +47,7 @@ export default function PublicVote() {
   }, [electionId]);
 
   const resetEntry = () => {
-    setNumber(''); setTurnstileToken(null); setEligibility(null); setStudent(null);
+    setNumber(''); setTurnstileToken(null); setVoteToken(null); setEligibility(null); setStudent(null);
     setSubmitError(''); setStage('entry');
   };
 
@@ -75,13 +76,17 @@ export default function PublicVote() {
   };
 
   const submitVote = async (selections) => {
+    if (!voteToken) {
+      setSubmitError('Still verifying — please wait a moment and try submitting again.');
+      return;
+    }
     setSubmitting(true);
     setSubmitError('');
     try {
       const res = await fetch(`${API_BASE}/api/cast-vote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ election_id: electionId, student_id: student.id, selections, turnstileToken }),
+        body: JSON.stringify({ election_id: electionId, student_id: student.id, selections, turnstileToken: voteToken }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -123,6 +128,16 @@ export default function PublicVote() {
   if (stage === 'ballot') {
     return (
       <FullscreenPublic>
+        {/* Fresh Turnstile check for the actual vote submission — the entry
+            screen's token was already spent on check-eligibility above.
+            Mounted as soon as the ballot loads so it has time to verify in
+            the background while the voter is browsing candidates. Kept
+            visible (not display:none) — Cloudflare's widget needs to
+            actually render to complete its check. */}
+        <div className="max-w-md mx-auto mb-6 flex flex-col items-center gap-2">
+          <p className="text-xs text-slate-400">Verifying your session…</p>
+          <Turnstile onVerify={setVoteToken} onExpire={() => setVoteToken(null)} />
+        </div>
         <Ballot election={election} student={student} positions={positions} candidates={candidates} onSubmit={submitVote} submitting={submitting} />
         {submitError && (
           <div className="fixed bottom-24 left-1/2 -translate-x-1/2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
