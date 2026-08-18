@@ -56,8 +56,13 @@ export default function Elections() {
     load();
   };
 
-  const copyVotingLink = (e) => {
-    const url = `${window.location.origin}${window.location.pathname}#/vote-online?election=${e.id}`;
+    const copyVotingLink = (e) => {
+    // Always build from the known public website address, never the current
+    // page's own address — inside the desktop app there IS no web address
+    // (it loads from a local file), so window.location would produce a
+    // file:// path that no voter's device could ever open.
+    const base = import.meta.env.VITE_API_BASE_URL || window.location.origin;
+    const url = `${base}/#/vote-online?election=${e.id}`;
     navigator.clipboard.writeText(url);
     toast({ title: 'Voting link copied', description: url });
   };
