@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { Trophy, BarChart3 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
@@ -22,8 +22,21 @@ export function tallyResults(positions, candidates, votes) {
 const PALETTE = ['#1F365C', '#D4A437', '#637D97', '#8FA8BF', '#B58B25', '#3C5B85'];
 
 export default function Results() {
-  const { election } = useOutletContext();
+  const { election: activeElection } = useOutletContext();
+  // Archives links here as /results?election=<id> so an archived election's
+  // results can be viewed/exported without switching it to "active".
+  const [searchParams] = useSearchParams();
+  const overrideId = searchParams.get('election');
+  const [overrideElection, setOverrideElection] = useState(undefined);
   const [data, setData] = useState(null);
+
+  useEffect(() => {
+    if (!overrideId) { setOverrideElection(undefined); return; }
+    base44.entities.Election.get(overrideId).then(setOverrideElection).catch(() => setOverrideElection(null));
+  }, [overrideId]);
+
+  const election = overrideId ? overrideElection : activeElection;
+  const isArchivedView = !!overrideId;
 
   useEffect(() => {
     if (!election) return;
@@ -41,20 +54,28 @@ export default function Results() {
     return unsub;
   }, [election]);
 
+  if (overrideId && election === undefined) return <Loader label="Loading archived election" />;
+  if (overrideId && election === null) return <p className="text-slate-500">That election could not be found.</p>;
   if (!election) return <p className="text-slate-500">No election available.</p>;
   if (!data) return <Loader label="Tallying results" />;
   if (!data.results.length) return <EmptyState icon={BarChart3} title="No results yet" description="Add positions and candidates to see live tallies." />;
 
   const turnout = data.students.length ? Math.round((data.votes.length / data.students.length) * 1000) / 10 : 0;
+  const onlineVotes = data.votes.filter(v => v.channel === 'online').length;
+  const stationVotes = data.votes.length - onlineVotes;
 
   return (
     <div>
-      <PageHeader title="Results" subtitle={`Live tally · ${election.name}`} />
-      <div className="grid sm:grid-cols-3 gap-4 mb-8">
+      <PageHeader title="Results" subtitle={`${isArchivedView ? 'Archived tally' : 'Live tally'} · ${election.name}`} />
+      <div className="grid sm:grid-cols-3 gap-4 mb-4">
         <StatCard icon={BarChart3} label="Ballots Cast" value={data.votes.length.toLocaleString()} />
         <StatCard icon={Trophy} label="Positions Contested" value={data.results.length} />
         <StatCard icon={BarChart3} label="Turnout" value={`${turnout}%`} accent />
       </div>
+      {onlineVotes > 0 && (
+        <p className="text-sm text-slate-500 mb-8">{stationVotes.toLocaleString()} in-person · {onlineVotes.toLocaleString()} online</p>
+      )}
+      {onlineVotes === 0 && <div className="mb-8" />}
 
       <div className="space-y-6">
         {data.results.map(r => (

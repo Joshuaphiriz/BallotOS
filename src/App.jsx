@@ -30,6 +30,7 @@ import Branding from '@/pages/Branding';
 import Settings from '@/pages/Settings';
 import AuditLogs from '@/pages/AuditLogs';
 import StationSetup from '@/pages/StationSetup';
+import PublicVote from '@/pages/PublicVote';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -56,6 +57,9 @@ const AuthenticatedApp = () => {
       {/* Public voting portal — voters never log in; the polling assistant's
           session (active on this PC) powers the API calls. */}
       <Route path="/vote" element={<Voting />} />
+      {/* Public ONLINE voting — no login, no station required at all. Voters
+          reach this via a shareable link (per election, admin-controlled). */}
+      <Route path="/vote-online" element={<PublicVote />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />

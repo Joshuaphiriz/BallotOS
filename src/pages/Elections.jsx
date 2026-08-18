@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
-import { Vote, Plus, CheckCircle2, Lock, Star, Trash2 } from 'lucide-react';
+import { Vote, Plus, CheckCircle2, Lock, Star, Trash2, Globe, Copy } from 'lucide-react';
 import PageHeader from '@/components/ems/PageHeader';
 import EmptyState from '@/components/ems/EmptyState';
 import Loader from '@/components/ems/Loader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import { logAudit, applyTheme } from '@/lib/ems';
 
@@ -48,6 +49,19 @@ export default function Elections() {
     load();
   };
 
+  const toggleOnlineVoting = async (e, enabled) => {
+    await base44.entities.Election.update(e.id, { online_voting_enabled: enabled });
+    await logAudit(`Online voting ${enabled ? 'enabled' : 'disabled'}: ${e.name}`, 'election', '', e.id);
+    toast({ title: `Online voting ${enabled ? 'enabled' : 'disabled'}`, description: e.name });
+    load();
+  };
+
+  const copyVotingLink = (e) => {
+    const url = `${window.location.origin}${window.location.pathname}#/vote-online?election=${e.id}`;
+    navigator.clipboard.writeText(url);
+    toast({ title: 'Voting link copied', description: url });
+  };
+
   if (!elections) return <Loader />;
 
   return (
@@ -74,6 +88,17 @@ export default function Elections() {
               </div>
               <h3 className="mt-4 font-semibold text-slate-900 dark:text-white">{e.name}</h3>
               <p className="text-sm text-slate-500">{e.association_name}</p>
+
+              <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5">
+                <span className="text-sm text-slate-600 dark:text-slate-300 flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />Online voting</span>
+                <Switch checked={!!e.online_voting_enabled} onCheckedChange={(v) => toggleOnlineVoting(e, v)} />
+              </div>
+              {e.online_voting_enabled && (
+                <Button size="sm" variant="outline" className="mt-2 w-full rounded-lg" onClick={() => copyVotingLink(e)}>
+                  <Copy className="h-3.5 w-3.5 mr-1.5" />Copy voting link
+                </Button>
+              )}
+
               <div className="mt-5 flex flex-wrap gap-2">
                 {!e.is_active && <Button size="sm" variant="outline" className="rounded-lg" onClick={() => makeActive(e)}><Star className="h-3.5 w-3.5 mr-1.5" />Set active</Button>}
                 {e.status !== 'open' && <Button size="sm" className="rounded-lg" style={{ background: 'var(--ems-primary)' }} onClick={() => setStatus(e, 'open')}><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />Open</Button>}
