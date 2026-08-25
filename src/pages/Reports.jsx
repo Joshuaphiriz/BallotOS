@@ -17,9 +17,9 @@ export default function Reports() {
     if (!election) return;
     Promise.all([
       base44.entities.Position.filter({ election_id: election.id }, 'order'),
-      base44.entities.Candidate.filter({ election_id: election.id }, '-created_date', 500),
-      base44.entities.Vote.filter({ election_id: election.id }, '-created_date', 5000),
-      base44.entities.Student.filter({ election_id: election.id }, '-created_date', 5000),
+      base44.entities.Candidate.filter({ election_id: election.id }, '-created_date'),
+      base44.entities.Vote.filter({ election_id: election.id }, '-created_date'),
+      base44.entities.Student.filter({ election_id: election.id }, '-created_date'),
     ]).then(([positions, candidates, votes, students]) =>
       setData({ results: tallyResults(positions, candidates, votes), votes, students }));
   }, [election]);

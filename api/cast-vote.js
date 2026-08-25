@@ -52,8 +52,14 @@ export default async function handler(req, res) {
     admin.from('candidates').select('id, position_id, full_name').eq('election_id', election_id),
   ]);
 
-  // Validate every submitted position/candidate actually belongs to this
-  // election — never trust IDs supplied by the client as-is.
+  // Require a complete ballot — a selection for every contested position
+  // (positions with zero candidates are naturally skipped, since nobody can
+  // vote for them). This is the critical check: without it, any partial
+  // submission — whether from a UI glitch, a slow network dropping later
+  // selections, or someone tampering with the request — gets accepted as a
+  // final vote and permanently locks that person out with only part of
+  // their ballot recorded.
+  const contestedPositions = positions.filter((p) => candidates.some((c) => c.position_id === p.id));
   const rows = [];
   for (const [positionId, candidateId] of Object.entries(selections)) {
     const position = positions.find((p) => p.id === positionId);
@@ -68,8 +74,8 @@ export default async function handler(req, res) {
       candidate_name: candidate.full_name,
     });
   }
-  if (!rows.length) {
-    return res.status(400).json({ error: 'No selections submitted' });
+  if (rows.length !== contestedPositions.length) {
+    return res.status(400).json({ error: 'Please make a selection for every position before submitting.' });
   }
 
   // Atomic claim: only succeeds if this student hadn't already voted.

@@ -29,7 +29,7 @@ export default function Voting() {
     if (!election) return;
     Promise.all([
       base44.entities.Position.filter({ election_id: election.id }, 'order'),
-      base44.entities.Candidate.filter({ election_id: election.id }, '-created_date', 500),
+      base44.entities.Candidate.filter({ election_id: election.id }, '-created_date'),
     ]).then(([positions, candidates]) => setData({ positions, candidates }));
   }, [election]);
 
@@ -90,6 +90,14 @@ export default function Voting() {
 
   const submit = async (selections) => {
     setSubmitting(true);
+    // Require a complete ballot — same protection as the online voting
+    // endpoint. Positions with no candidates are naturally excluded.
+    const contestedPositions = data.positions.filter(p => data.candidates.some(c => c.position_id === p.id));
+    if (Object.keys(selections).length !== contestedPositions.length) {
+      toast({ title: 'Incomplete ballot', description: 'Please select a candidate for every position.', variant: 'destructive' });
+      setSubmitting(false);
+      return;
+    }
     // Re-check eligibility right before recording — prevents a double submit.
     const fresh = await base44.entities.Student.filter({ id: student.id });
     if (fresh[0]?.has_voted) {
