@@ -13,7 +13,7 @@ import {
 // land right on Submit before the voter has even registered the dialog
 // appeared. A voter has never legitimately needed to confirm within a
 // fraction of a second of the dialog opening.
-const CONFIRM_DELAY_MS = 700;
+const CONFIRM_DELAY_MS = 250;
 
 export default function Ballot({ election, student, positions, candidates, onSubmit, submitting }) {
   const [selections, setSelections] = useState({});

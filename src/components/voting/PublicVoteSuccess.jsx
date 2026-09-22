@@ -6,7 +6,7 @@ import { CheckCircle2, RotateCcw } from 'lucide-react';
 // first, and only once it finishes does the "you're done" screen appear.
 // There is no way to skip ahead of the countdown.
 export default function PublicVoteSuccess({ onDone, onVoteAgain }) {
-  const [count, setCount] = useState(5);
+  const [count, setCount] = useState(3);
   const [finished, setFinished] = useState(false);
 
   useEffect(() => {
