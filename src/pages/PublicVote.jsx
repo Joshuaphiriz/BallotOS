@@ -13,8 +13,6 @@ import { applyTheme } from '@/lib/ems';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 // Kept as a single exported constant so it's easy to find and edit later —
 // this is plain-language guidance for a student/association election, not
 // legal boilerplate.
@@ -22,7 +20,7 @@ export const TERMS_AND_CONDITIONS = `By voting online, you agree to the followin
 
 1. One vote per eligible person. Your computer number may only be used to cast a single ballot in this election.
 2. Votes are final. Once submitted, your vote cannot be changed, withdrawn, or resubmitted.
-3. Your computer number (and your email address, if this election collects one) will be stored as part of the official voting record for this election.
+3. Your computer number will be stored as part of the official voting record for this election.
 4. In the event of a dispute, votes and the associated voting record may be reviewed by the election administrators.
 
 If you do not agree with the above, please do not proceed with online voting.`;
@@ -46,7 +44,6 @@ export default function PublicVote() {
   const [checking, setChecking] = useState(false);
   const [eligibility, setEligibility] = useState(null); // { status, student? }
   const [student, setStudent] = useState(null);
-  const [voterEmail, setVoterEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -65,7 +62,7 @@ export default function PublicVote() {
 
   const resetEntry = () => {
     setNumber(''); setAgreedToTerms(false); setTurnstileToken(null); setVoteToken(null); setEligibility(null); setStudent(null);
-    setVoterEmail(''); setSubmitError(''); setStage('entry');
+    setSubmitError(''); setStage('entry');
   };
 
   const checkEligibility = async (e) => {
@@ -103,13 +100,7 @@ export default function PublicVote() {
       const res = await fetch(`${API_BASE}/api/cast-vote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          election_id: electionId,
-          student_id: student.id,
-          selections,
-          turnstileToken: voteToken,
-          ...(ballot.election.collect_voter_email ? { voter_email: voterEmail.trim() } : {}),
-        }),
+        body: JSON.stringify({ election_id: electionId, student_id: student.id, selections, turnstileToken: voteToken }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -237,24 +228,7 @@ export default function PublicVote() {
             <ShieldCheck className="h-8 w-8 mx-auto mb-2" style={{ color: 'var(--ems-primary)' }} />
             <p className="font-medium text-slate-900 dark:text-white">Welcome, {eligibility.student.full_name}</p>
             <p className="text-sm text-slate-500">Computer number {eligibility.student.computer_number}</p>
-
-            {election.collect_voter_email && (
-              <div className="mt-4 text-left max-w-xs mx-auto">
-                <p className="text-xs text-slate-400 mb-1.5">Your email address is being collected for this election.</p>
-                <Input
-                  type="email"
-                  value={voterEmail}
-                  onChange={(e) => setVoterEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="rounded-xl h-11"
-                />
-              </div>
-            )}
-
-            <Button
-              onClick={startVoting}
-              disabled={election.collect_voter_email && !EMAIL_RE.test(voterEmail.trim())}
-              className="mt-4 rounded-xl h-12 px-8 text-base" style={{ background: 'var(--ems-primary)' }}>
+            <Button onClick={startVoting} className="mt-4 rounded-xl h-12 px-8 text-base" style={{ background: 'var(--ems-primary)' }}>
               <VoteIcon className="h-4 w-4 mr-2" />Start Voting
             </Button>
           </motion.div>
