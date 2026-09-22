@@ -56,6 +56,13 @@ export default function Elections() {
     load();
   };
 
+  const toggleCollectVoterEmail = async (e, enabled) => {
+    await base44.entities.Election.update(e.id, { collect_voter_email: enabled });
+    await logAudit(`Collect voter email ${enabled ? 'enabled' : 'disabled'}: ${e.name}`, 'election', '', e.id);
+    toast({ title: `Collect voter email ${enabled ? 'enabled' : 'disabled'}`, description: e.name });
+    load();
+  };
+
     const copyVotingLink = (e) => {
     // Always build from the known public website address, never the current
     // page's own address — inside the desktop app there IS no web address
@@ -99,9 +106,18 @@ export default function Elections() {
                 <Switch checked={!!e.online_voting_enabled} onCheckedChange={(v) => toggleOnlineVoting(e, v)} />
               </div>
               {e.online_voting_enabled && (
-                <Button size="sm" variant="outline" className="mt-2 w-full rounded-lg" onClick={() => copyVotingLink(e)}>
-                  <Copy className="h-3.5 w-3.5 mr-1.5" />Copy voting link
-                </Button>
+                <>
+                  <div className="mt-2 flex items-center justify-between rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5">
+                    <div className="pr-3">
+                      <span className="text-sm text-slate-600 dark:text-slate-300">Collect voter email</span>
+                      <p className="text-xs text-slate-400 mt-0.5">Online voters for this election will be asked for their email address before submitting their vote.</p>
+                    </div>
+                    <Switch checked={!!e.collect_voter_email} onCheckedChange={(v) => toggleCollectVoterEmail(e, v)} />
+                  </div>
+                  <Button size="sm" variant="outline" className="mt-2 w-full rounded-lg" onClick={() => copyVotingLink(e)}>
+                    <Copy className="h-3.5 w-3.5 mr-1.5" />Copy voting link
+                  </Button>
+                </>
               )}
 
               <div className="mt-5 flex flex-wrap gap-2">

@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Server is missing Supabase service role configuration' });
   }
 
-  const { election_id, student_id, selections, turnstileToken } = req.body || {};
+  const { election_id, student_id, selections, turnstileToken, voter_email } = req.body || {};
   if (!election_id || !student_id || !selections || typeof selections !== 'object') {
     return res.status(400).json({ error: 'election_id, student_id and selections are required' });
   }
@@ -40,11 +40,23 @@ export default async function handler(req, res) {
 
   const { data: election } = await admin
     .from('elections')
-    .select('id, status, online_voting_enabled')
+    .select('id, status, online_voting_enabled, collect_voter_email')
     .eq('id', election_id)
     .single();
   if (!election || !election.online_voting_enabled || election.status !== 'open') {
     return res.status(403).json({ error: 'This election is not open for online voting' });
+  }
+
+  // Server-side re-validation — never trust the client's own email check.
+  // If this election doesn't collect emails, silently discard any voter_email
+  // sent anyway so a tampered request can't force-store one.
+  let validatedEmail = null;
+  if (election.collect_voter_email) {
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!voter_email || typeof voter_email !== 'string' || !EMAIL_RE.test(voter_email.trim())) {
+      return res.status(400).json({ error: 'A valid email address is required to vote in this election.' });
+    }
+    validatedEmail = voter_email.trim();
   }
 
   const [{ data: positions }, { data: candidates }] = await Promise.all([
@@ -102,6 +114,7 @@ export default async function handler(req, res) {
     station_name: 'Online',
     channel: 'online',
     selections: rows,
+    voter_email: validatedEmail,
   });
   if (voteError) {
     return res.status(500).json({ error: 'Failed to record vote' });
@@ -112,6 +125,7 @@ export default async function handler(req, res) {
     actor: 'system',
     action: `Online vote submitted by ${claimed.computer_number}`,
     category: 'vote',
+    details: validatedEmail || '',
   });
 
   return res.status(200).json({ success: true });

@@ -33,7 +33,7 @@ export default async function handler(req, res) {
 
   const { data: election, error: electionError } = await admin
     .from('elections')
-    .select('id, name, association_name, association_abbr, logo_url, primary_color, secondary_color, accent_color, status, online_voting_enabled')
+    .select('id, name, association_name, association_abbr, logo_url, primary_color, secondary_color, accent_color, status, online_voting_enabled, collect_voter_email')
     .eq('id', electionId)
     .single();
 

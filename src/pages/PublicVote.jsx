@@ -8,9 +8,24 @@ import Turnstile from '@/components/voting/Turnstile';
 import Loader from '@/components/ems/Loader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { applyTheme } from '@/lib/ems';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Kept as a single exported constant so it's easy to find and edit later —
+// this is plain-language guidance for a student/association election, not
+// legal boilerplate.
+export const TERMS_AND_CONDITIONS = `By voting online, you agree to the following:
+
+1. One vote per eligible person. Your computer number may only be used to cast a single ballot in this election.
+2. Votes are final. Once submitted, your vote cannot be changed, withdrawn, or resubmitted.
+3. Your computer number (and your email address, if this election collects one) will be stored as part of the official voting record for this election.
+4. In the event of a dispute, votes and the associated voting record may be reviewed by the election administrators.
+
+If you do not agree with the above, please do not proceed with online voting.`;
 
 // PUBLIC route — /vote?election=<id> — no login, no admin chrome. Every
 // write goes through cast-vote.js / check-eligibility.js (service role,
@@ -25,11 +40,13 @@ export default function PublicVote() {
 
   const [stage, setStage] = useState('entry'); // entry | ballot | success
   const [number, setNumber] = useState('');
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState(null);
   const [voteToken, setVoteToken] = useState(null); // separate token — Turnstile tokens are single-use
   const [checking, setChecking] = useState(false);
   const [eligibility, setEligibility] = useState(null); // { status, student? }
   const [student, setStudent] = useState(null);
+  const [voterEmail, setVoterEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -47,13 +64,13 @@ export default function PublicVote() {
   }, [electionId]);
 
   const resetEntry = () => {
-    setNumber(''); setTurnstileToken(null); setVoteToken(null); setEligibility(null); setStudent(null);
-    setSubmitError(''); setStage('entry');
+    setNumber(''); setAgreedToTerms(false); setTurnstileToken(null); setVoteToken(null); setEligibility(null); setStudent(null);
+    setVoterEmail(''); setSubmitError(''); setStage('entry');
   };
 
   const checkEligibility = async (e) => {
     e.preventDefault();
-    if (!number.trim() || !turnstileToken) return;
+    if (!number.trim() || !turnstileToken || !agreedToTerms) return;
     setChecking(true);
     setEligibility(null);
     try {
@@ -86,7 +103,13 @@ export default function PublicVote() {
       const res = await fetch(`${API_BASE}/api/cast-vote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ election_id: electionId, student_id: student.id, selections, turnstileToken: voteToken }),
+        body: JSON.stringify({
+          election_id: electionId,
+          student_id: student.id,
+          selections,
+          turnstileToken: voteToken,
+          ...(ballot.election.collect_voter_email ? { voter_email: voterEmail.trim() } : {}),
+        }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -177,7 +200,17 @@ export default function PublicVote() {
             className="rounded-xl h-14 text-lg font-mono text-center"
           />
           <Turnstile onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
-          <Button type="submit" disabled={checking || !number.trim() || !turnstileToken} className="w-full rounded-xl h-14 text-base" style={{ background: 'var(--ems-primary)' }}>
+
+          <details className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 p-3 text-sm text-slate-500">
+            <summary className="cursor-pointer font-medium text-slate-600 dark:text-slate-300">Terms &amp; Conditions</summary>
+            <p className="mt-2 whitespace-pre-line">{TERMS_AND_CONDITIONS}</p>
+          </details>
+          <label className="flex items-start gap-2.5 text-sm text-slate-600 dark:text-slate-300 cursor-pointer">
+            <Checkbox checked={agreedToTerms} onCheckedChange={(v) => setAgreedToTerms(!!v)} className="mt-0.5" />
+            I agree to the Terms &amp; Conditions
+          </label>
+
+          <Button type="submit" disabled={checking || !number.trim() || !turnstileToken || !agreedToTerms} className="w-full rounded-xl h-14 text-base" style={{ background: 'var(--ems-primary)' }}>
             <Search className="h-5 w-5 mr-2" />{checking ? 'Checking…' : 'Check eligibility'}
           </Button>
         </form>
@@ -204,7 +237,24 @@ export default function PublicVote() {
             <ShieldCheck className="h-8 w-8 mx-auto mb-2" style={{ color: 'var(--ems-primary)' }} />
             <p className="font-medium text-slate-900 dark:text-white">Welcome, {eligibility.student.full_name}</p>
             <p className="text-sm text-slate-500">Computer number {eligibility.student.computer_number}</p>
-            <Button onClick={startVoting} className="mt-4 rounded-xl h-12 px-8 text-base" style={{ background: 'var(--ems-primary)' }}>
+
+            {election.collect_voter_email && (
+              <div className="mt-4 text-left max-w-xs mx-auto">
+                <p className="text-xs text-slate-400 mb-1.5">Your email address is being collected for this election.</p>
+                <Input
+                  type="email"
+                  value={voterEmail}
+                  onChange={(e) => setVoterEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="rounded-xl h-11"
+                />
+              </div>
+            )}
+
+            <Button
+              onClick={startVoting}
+              disabled={election.collect_voter_email && !EMAIL_RE.test(voterEmail.trim())}
+              className="mt-4 rounded-xl h-12 px-8 text-base" style={{ background: 'var(--ems-primary)' }}>
               <VoteIcon className="h-4 w-4 mr-2" />Start Voting
             </Button>
           </motion.div>
@@ -229,8 +279,11 @@ function StatusCard({ icon: Icon, tone, title, desc }) {
 
 function FullscreenPublic({ children }) {
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <div className="mx-auto max-w-4xl px-6 py-8">{children}</div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
+      <div className="mx-auto max-w-4xl px-6 py-8 flex-1 w-full">{children}</div>
+      <footer className="text-center text-xs text-slate-400 px-6 py-4">
+        © {new Date().getFullYear()} BallotOS. All rights reserved. Developed by Joshua Phiri — phirijoshua784@gmail.com
+      </footer>
     </div>
   );
 }
