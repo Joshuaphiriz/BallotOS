@@ -56,16 +56,30 @@ export default async function handler(req, res) {
     return res.status(200).json({ status: 'election_closed' });
   }
 
+  // An admin reset clears both the lock AND the rate limit below — a voter
+  // an admin just unblocked should not still be stuck behind their own
+  // pre-reset attempts for the rest of the hour.
+  const { data: lastReset } = await admin
+    .from('voter_audit_log')
+    .select('created_date')
+    .eq('election_id', election_id)
+    .eq('computer_number', computerNumber)
+    .eq('event_type', 'admin_reset')
+    .order('created_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   // Rate limit: max 3 requests/hour for this computer number, regardless of
   // whether it matches a real voter — this also throttles roster-guessing.
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const rateLimitSince = lastReset && lastReset.created_date > oneHourAgo ? lastReset.created_date : oneHourAgo;
   const { count: recentRequests } = await admin
     .from('voter_audit_log')
     .select('id', { count: 'exact', head: true })
     .eq('election_id', election_id)
     .eq('computer_number', computerNumber)
     .eq('event_type', 'code_requested')
-    .gte('created_date', oneHourAgo);
+    .gte('created_date', rateLimitSince);
   if ((recentRequests || 0) >= MAX_REQUESTS_PER_HOUR) {
     return res.status(429).json({ status: 'rate_limited', error: 'Too many requests. Please try again later.' });
   }
@@ -90,15 +104,6 @@ export default async function handler(req, res) {
   }
 
   // Lock check: count codes issued since the last admin reset.
-  const { data: lastReset } = await admin
-    .from('voter_audit_log')
-    .select('created_date')
-    .eq('election_id', election_id)
-    .eq('computer_number', computerNumber)
-    .eq('event_type', 'admin_reset')
-    .order('created_date', { ascending: false })
-    .limit(1)
-    .maybeSingle();
 
   let codesQuery = admin
     .from('verification_codes')
