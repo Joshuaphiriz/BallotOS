@@ -176,6 +176,7 @@ const entities = {
   Vote: makeEntity('votes'),
   User: makeEntity('users'),
   AuditLog: makeEntity('audit_logs'),
+  VoterAuditLog: makeEntity('voter_audit_log'),
 };
 
 // ---------------------------------------------------------------------------

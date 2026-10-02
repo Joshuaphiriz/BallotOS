@@ -29,6 +29,7 @@ import Users from '@/pages/Users';
 import Branding from '@/pages/Branding';
 import Settings from '@/pages/Settings';
 import AuditLogs from '@/pages/AuditLogs';
+import VoterVerificationLog from '@/pages/VoterVerificationLog';
 import StationSetup from '@/pages/StationSetup';
 import PublicVote from '@/pages/PublicVote';
 
@@ -83,6 +84,7 @@ const AuthenticatedApp = () => {
           <Route path="/branding" element={<RoleGuard cap="manage"><Branding /></RoleGuard>} />
           <Route path="/settings" element={<RoleGuard cap="manage"><Settings /></RoleGuard>} />
           <Route path="/audit-logs" element={<RoleGuard cap="logs"><AuditLogs /></RoleGuard>} />
+          <Route path="/voter-verification" element={<RoleGuard cap="logs"><VoterVerificationLog /></RoleGuard>} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

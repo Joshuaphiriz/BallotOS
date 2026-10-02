@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, ShieldAlert, ShieldCheck, Vote as VoteIcon, CalendarClock } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Search, ShieldAlert, CalendarClock, MailCheck, Lock } from 'lucide-react';
 import Ballot from '@/components/voting/Ballot';
 import PublicVoteSuccess from '@/components/voting/PublicVoteSuccess';
 import Turnstile from '@/components/voting/Turnstile';
@@ -20,14 +19,37 @@ export const TERMS_AND_CONDITIONS = `By voting online, you agree to the followin
 
 1. One vote per eligible person. Your computer number may only be used to cast a single ballot in this election.
 2. Votes are final. Once submitted, your vote cannot be changed, withdrawn, or resubmitted.
-3. Your computer number will be stored as part of the official voting record for this election.
-4. In the event of a dispute, votes and the associated voting record may be reviewed by the election administrators.
+3. A one-time code will be emailed to the address on file for your computer number, to confirm it's really you.
+4. In the event of a dispute, the verification record (not your ballot) may be reviewed by election administrators.
 
 If you do not agree with the above, please do not proceed with online voting.`;
 
-// PUBLIC route — /vote?election=<id> — no login, no admin chrome. Every
-// write goes through cast-vote.js / check-eligibility.js (service role,
-// server-side validated) — this page never talks to Supabase directly.
+const ENTRY_MESSAGES = {
+  not_found: ['Not on the voter roll', (n) => `No student found with computer number ${n}.`],
+  no_email: ['No email on file', () => 'Your computer number is registered but has no email on file. Please contact the election team.'],
+  already_voted: ['Already voted', () => 'This computer number has already cast a ballot.'],
+  locked: ['Locked', () => 'Too many code attempts. Please contact the election team to have this computer number reset.'],
+  election_closed: ['Voting is closed', () => 'This election is no longer accepting votes.'],
+  captcha_failed: ['Verification failed', () => 'Please complete the verification and try again.'],
+  rate_limited: ['Too many requests', () => 'Please wait a while before requesting another code.'],
+  send_failed: ['Could not send code', () => 'We could not email your code just now. Please try again shortly.'],
+  error: ['Something went wrong', () => 'Please check your connection and try again.'],
+};
+
+const CODE_MESSAGES = {
+  wrong_code: (body) => `Incorrect code. ${body.attempts_remaining ?? 0} attempt${body.attempts_remaining === 1 ? '' : 's'} remaining.`,
+  invalidated: () => 'Too many incorrect attempts — this code is no longer valid. Request a new one below.',
+  expired: () => 'This code has expired. Request a new one below.',
+  no_active_code: () => 'No active code found. Request a new one below.',
+  captcha_failed: () => 'Please complete the verification and try again.',
+  error: () => 'Please check your connection and try again.',
+};
+
+// PUBLIC route — /vote-online?election=<id> — no login, no admin chrome.
+// Every write goes through request-code.js / verify-code.js / cast-vote.js
+// (service role, server-side validated) — this page never talks to
+// Supabase directly. A computer number alone is no longer enough to vote:
+// a one-time code emailed to the address on file must be verified first.
 export default function PublicVote() {
   const [searchParams] = useSearchParams();
   const electionId = searchParams.get('election');
@@ -36,14 +58,20 @@ export default function PublicVote() {
   const [ballot, setBallot] = useState(null); // { election, positions, candidates }
   const [loadError, setLoadError] = useState(null);
 
-  const [stage, setStage] = useState('entry'); // entry | ballot | success
+  const [stage, setStage] = useState('entry'); // entry | code | ballot | success
   const [number, setNumber] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [turnstileToken, setTurnstileToken] = useState(null);
-  const [voteToken, setVoteToken] = useState(null); // separate token — Turnstile tokens are single-use
-  const [checking, setChecking] = useState(false);
-  const [eligibility, setEligibility] = useState(null); // { status, student? }
-  const [student, setStudent] = useState(null);
+  const [entryToken, setEntryToken] = useState(null);
+  const [codeToken, setCodeToken] = useState(null);
+  const [voteToken, setVoteToken] = useState(null); // separate token per step — Turnstile tokens are single-use
+  const [requesting, setRequesting] = useState(false);
+  const [entryStatus, setEntryStatus] = useState(null); // { status, masked_email? }
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [codeStatus, setCodeStatus] = useState(null);
+  const [votePass, setVotePass] = useState(null);
+  const [fullName, setFullName] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -61,32 +89,90 @@ export default function PublicVote() {
   }, [electionId]);
 
   const resetEntry = () => {
-    setNumber(''); setAgreedToTerms(false); setTurnstileToken(null); setVoteToken(null); setEligibility(null); setStudent(null);
+    setNumber(''); setAgreedToTerms(false); setEntryToken(null); setCodeToken(null); setVoteToken(null);
+    setEntryStatus(null); setMaskedEmail(''); setCode(''); setCodeStatus(null); setVotePass(null); setFullName(null);
     setSubmitError(''); setStage('entry');
   };
 
-  const checkEligibility = async (e) => {
+  const requestCode = async (e) => {
     e.preventDefault();
-    if (!number.trim() || !turnstileToken || !agreedToTerms) return;
-    setChecking(true);
-    setEligibility(null);
+    if (!number.trim() || !entryToken || !agreedToTerms) return;
+    setRequesting(true);
+    setEntryStatus(null);
     try {
-      const res = await fetch(`${API_BASE}/api/check-eligibility`, {
+      const res = await fetch(`${API_BASE}/api/request-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ election_id: electionId, computer_number: number.trim(), turnstileToken }),
+        body: JSON.stringify({ election_id: electionId, computer_number: number.trim(), turnstileToken: entryToken }),
       });
       const body = await res.json();
-      setEligibility(body);
+      if (body.status === 'sent') {
+        setMaskedEmail(body.masked_email || '');
+        setCodeStatus(null);
+        setStage('code');
+      } else {
+        setEntryStatus(body);
+      }
     } catch {
-      setEligibility({ status: 'error' });
+      setEntryStatus({ status: 'error' });
     }
-    setChecking(false);
+    setEntryToken(null);
+    setRequesting(false);
   };
 
-  const startVoting = () => {
-    setStudent(eligibility.student);
-    setStage('ballot');
+  const requestReplacementCode = async () => {
+    // Same endpoint, same number — request-code.js handles the "one
+    // replacement cancels the old code" rule server-side.
+    if (!codeToken) return;
+    setRequesting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/request-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ election_id: electionId, computer_number: number.trim(), turnstileToken: codeToken }),
+      });
+      const body = await res.json();
+      if (body.status === 'sent') {
+        setMaskedEmail(body.masked_email || maskedEmail);
+        setCodeStatus(null);
+      } else if (body.status === 'locked') {
+        setStage('entry');
+        setEntryStatus(body);
+      } else {
+        setCodeStatus({ status: 'error' });
+      }
+    } catch {
+      setCodeStatus({ status: 'error' });
+    }
+    setCodeToken(null);
+    setRequesting(false);
+  };
+
+  const verifyCode = async (e) => {
+    e.preventDefault();
+    if (!code.trim() || !codeToken) return;
+    setVerifying(true);
+    setCodeStatus(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ election_id: electionId, computer_number: number.trim(), code: code.trim(), turnstileToken: codeToken }),
+      });
+      const body = await res.json();
+      if (body.status === 'accepted') {
+        setVotePass(body.vote_pass);
+        setFullName(body.full_name || null);
+        setStage('ballot');
+      } else {
+        setCodeStatus(body);
+      }
+    } catch {
+      setCodeStatus({ status: 'error' });
+    }
+    setCodeToken(null);
+    setCode('');
+    setVerifying(false);
   };
 
   const submitVote = async (selections) => {
@@ -100,7 +186,7 @@ export default function PublicVote() {
       const res = await fetch(`${API_BASE}/api/cast-vote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ election_id: electionId, student_id: student.id, selections, turnstileToken: voteToken }),
+        body: JSON.stringify({ vote_pass: votePass, selections, turnstileToken: voteToken }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -142,17 +228,15 @@ export default function PublicVote() {
   if (stage === 'ballot') {
     return (
       <FullscreenPublic>
-        {/* Fresh Turnstile check for the actual vote submission — the entry
-            screen's token was already spent on check-eligibility above.
-            Mounted as soon as the ballot loads so it has time to verify in
-            the background while the voter is browsing candidates. Kept
-            visible (not display:none) — Cloudflare's widget needs to
-            actually render to complete its check. */}
+        {/* Fresh Turnstile check for the actual vote submission — earlier
+            tokens were already spent. Mounted as soon as the ballot loads
+            so it has time to verify in the background while the voter is
+            browsing candidates. */}
         <div className="max-w-md mx-auto mb-6 flex flex-col items-center gap-2">
           <p className="text-xs text-slate-400">Verifying your session…</p>
           <Turnstile onVerify={setVoteToken} onExpire={() => setVoteToken(null)} />
         </div>
-        <Ballot election={election} student={student} positions={positions} candidates={candidates} onSubmit={submitVote} submitting={submitting} />
+        <Ballot election={election} student={{ full_name: fullName, computer_number: number }} positions={positions} candidates={candidates} onSubmit={submitVote} submitting={submitting} />
         {submitError && (
           <div className="fixed bottom-24 left-1/2 -translate-x-1/2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
             {submitError}
@@ -170,6 +254,52 @@ export default function PublicVote() {
     );
   }
 
+  if (stage === 'code') {
+    return (
+      <FullscreenPublic>
+        <div className="max-w-md mx-auto py-10">
+          <div className="text-center mb-8">
+            <div className="h-16 w-16 rounded-2xl mx-auto grid place-items-center text-white" style={{ background: 'var(--ems-primary)' }}>
+              <MailCheck className="h-7 w-7" />
+            </div>
+            <h1 className="mt-4 text-xl font-semibold text-slate-900 dark:text-white">Check your email</h1>
+            <p className="text-slate-500 text-sm mt-1">We sent a 6-digit code to <span className="font-medium">{maskedEmail}</span></p>
+          </div>
+
+          <form onSubmit={verifyCode} className="space-y-4">
+            <Input
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="6-digit code"
+              inputMode="numeric"
+              className="rounded-xl h-14 text-2xl font-mono text-center tracking-[0.3em]"
+            />
+            <Turnstile onVerify={setCodeToken} onExpire={() => setCodeToken(null)} />
+            <Button type="submit" disabled={verifying || code.length !== 6 || !codeToken} className="w-full rounded-xl h-14 text-base" style={{ background: 'var(--ems-primary)' }}>
+              {verifying ? 'Checking…' : 'Verify code'}
+            </Button>
+          </form>
+
+          {codeStatus && (
+            <StatusCard icon={ShieldAlert} tone="red" title="Code not accepted" desc={(CODE_MESSAGES[codeStatus.status] || CODE_MESSAGES.error)(codeStatus)} />
+          )}
+
+          <div className="mt-6 text-center">
+            <button type="button" disabled={requesting || !codeToken} onClick={requestReplacementCode} className="text-sm text-slate-500 underline disabled:opacity-50">
+              {requesting ? 'Sending…' : "Didn't get a code? Send a new one"}
+            </button>
+            {!codeToken && <p className="text-xs text-slate-400 mt-1">Complete the verification above first.</p>}
+          </div>
+
+          <div className="mt-2 text-center">
+            <button type="button" onClick={resetEntry} className="text-xs text-slate-400 underline">Use a different computer number</button>
+          </div>
+        </div>
+      </FullscreenPublic>
+    );
+  }
+
   // entry
   return (
     <FullscreenPublic>
@@ -182,15 +312,15 @@ export default function PublicVote() {
           <p className="text-slate-500">Enter your computer number to vote online</p>
         </div>
 
-        <form onSubmit={checkEligibility} className="space-y-4">
+        <form onSubmit={requestCode} className="space-y-4">
           <Input
             autoFocus
             value={number}
-            onChange={(e) => { setNumber(e.target.value); setEligibility(null); }}
+            onChange={(e) => { setNumber(e.target.value); setEntryStatus(null); }}
             placeholder="Computer number"
             className="rounded-xl h-14 text-lg font-mono text-center"
           />
-          <Turnstile onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
+          <Turnstile onVerify={setEntryToken} onExpire={() => setEntryToken(null)} />
 
           <details className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 p-3 text-sm text-slate-500">
             <summary className="cursor-pointer font-medium text-slate-600 dark:text-slate-300">Terms &amp; Conditions</summary>
@@ -201,38 +331,16 @@ export default function PublicVote() {
             I agree to the Terms &amp; Conditions
           </label>
 
-          <Button type="submit" disabled={checking || !number.trim() || !turnstileToken || !agreedToTerms} className="w-full rounded-xl h-14 text-base" style={{ background: 'var(--ems-primary)' }}>
-            <Search className="h-5 w-5 mr-2" />{checking ? 'Checking…' : 'Check eligibility'}
+          <Button type="submit" disabled={requesting || !number.trim() || !entryToken || !agreedToTerms} className="w-full rounded-xl h-14 text-base" style={{ background: 'var(--ems-primary)' }}>
+            <Search className="h-5 w-5 mr-2" />{requesting ? 'Sending code…' : 'Send me a voting code'}
           </Button>
         </form>
 
-        {eligibility?.status === 'not_found' && (
-          <StatusCard icon={ShieldAlert} tone="red" title="Not on the voter roll" desc={`No student found with computer number ${number}.`} />
-        )}
-        {eligibility?.status === 'already_voted' && (
-          <StatusCard icon={ShieldAlert} tone="red" title="Already voted" desc="This computer number has already cast a ballot." />
-        )}
-        {eligibility?.status === 'election_closed' && (
-          <StatusCard icon={CalendarClock} tone="red" title="Voting is closed" desc="This election is no longer accepting votes." />
-        )}
-        {eligibility?.status === 'captcha_failed' && (
-          <StatusCard icon={ShieldAlert} tone="red" title="Verification failed" desc="Please complete the verification and try again." />
-        )}
-        {eligibility?.status === 'error' && (
-          <StatusCard icon={ShieldAlert} tone="red" title="Something went wrong" desc="Please check your connection and try again." />
-        )}
-
-        {eligibility?.status === 'eligible' && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className="mt-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-center">
-            <ShieldCheck className="h-8 w-8 mx-auto mb-2" style={{ color: 'var(--ems-primary)' }} />
-            <p className="font-medium text-slate-900 dark:text-white">Welcome, {eligibility.student.full_name}</p>
-            <p className="text-sm text-slate-500">Computer number {eligibility.student.computer_number}</p>
-            <Button onClick={startVoting} className="mt-4 rounded-xl h-12 px-8 text-base" style={{ background: 'var(--ems-primary)' }}>
-              <VoteIcon className="h-4 w-4 mr-2" />Start Voting
-            </Button>
-          </motion.div>
-        )}
+        {entryStatus && (() => {
+          const [title, descFn] = ENTRY_MESSAGES[entryStatus.status] || ENTRY_MESSAGES.error;
+          const icon = entryStatus.status === 'locked' ? Lock : ShieldAlert;
+          return <StatusCard icon={icon} tone="red" title={title} desc={descFn(number)} />;
+        })()}
       </div>
     </FullscreenPublic>
   );

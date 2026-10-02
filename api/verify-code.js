@@ -90,6 +90,15 @@ export default async function handler(req, res) {
 
   await logVoterEvent(admin, { electionId: election_id, computerNumber, eventType: 'code_accepted', ipAddress: ip, userAgent });
 
+  // full_name is for display only (so the ballot screen can greet the voter
+  // by name) — it is never embedded in the pass and never reaches the vote.
+  const { data: student } = await admin
+    .from('students')
+    .select('full_name')
+    .eq('election_id', election_id)
+    .eq('computer_number', computerNumber)
+    .maybeSingle();
+
   const votePass = issueVotingPass({ electionId: election_id, computerNumber });
-  return res.status(200).json({ status: 'accepted', vote_pass: votePass });
+  return res.status(200).json({ status: 'accepted', vote_pass: votePass, full_name: student?.full_name || null });
 }
