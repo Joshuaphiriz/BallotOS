@@ -1,11 +1,14 @@
 // Vercel serverless function — POST /api/cast-vote
-// Public, no login. This is the sensitive write, so everything is
-// re-verified here independently — never trust that check-eligibility
-// already ran. The has_voted claim is a single atomic UPDATE ... WHERE
-// has_voted = false, so two simultaneous requests for the same computer
-// number can never both succeed, no matter how they're timed.
+// Public, no login. Requires a voting pass issued by verify-code.js (proof a
+// one-time emailed code was already checked) — a computer number alone is
+// no longer enough to vote. The election_id/computer_number used for the
+// atomic claim come ONLY from the verified pass, never from the request
+// body, so a tampered body can't target a different voter or election.
 import { createClient } from '@supabase/supabase-js';
 import { verifyTurnstile } from './_lib/turnstile.js';
+import { verifyVotingPass, getClientIp, getUserAgent } from './_lib/verification.js';
+import { sendEmail } from './_lib/resend.js';
+import { logVoterEvent } from './_lib/voterAuditLog.js';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -24,15 +27,24 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Server is missing Supabase service role configuration' });
   }
 
-  const { election_id, student_id, selections, turnstileToken } = req.body || {};
-  if (!election_id || !student_id || !selections || typeof selections !== 'object') {
-    return res.status(400).json({ error: 'election_id, student_id and selections are required' });
+  const { vote_pass, selections, turnstileToken } = req.body || {};
+  if (!vote_pass || !selections || typeof selections !== 'object') {
+    return res.status(400).json({ error: 'vote_pass and selections are required' });
   }
 
-  const captcha = await verifyTurnstile(turnstileToken, req.headers['x-forwarded-for']);
+  const ip = getClientIp(req);
+  const userAgent = getUserAgent(req);
+
+  const captcha = await verifyTurnstile(turnstileToken, ip);
   if (!captcha.success) {
     return res.status(400).json({ error: captcha.reason || 'Verification failed' });
   }
+
+  const pass = verifyVotingPass(vote_pass);
+  if (!pass) {
+    return res.status(401).json({ error: 'Your voting session has expired. Please request a new code and try again.' });
+  }
+  const { election_id, computer_number } = pass;
 
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -40,7 +52,7 @@ export default async function handler(req, res) {
 
   const { data: election } = await admin
     .from('elections')
-    .select('id, status, online_voting_enabled')
+    .select('id, name, status, online_voting_enabled')
     .eq('id', election_id)
     .single();
   if (!election || !election.online_voting_enabled || election.status !== 'open') {
@@ -52,13 +64,10 @@ export default async function handler(req, res) {
     admin.from('candidates').select('id, position_id, full_name').eq('election_id', election_id),
   ]);
 
-  // Require a complete ballot — a selection for every contested position
-  // (positions with zero candidates are naturally skipped, since nobody can
-  // vote for them). This is the critical check: without it, any partial
-  // submission — whether from a UI glitch, a slow network dropping later
-  // selections, or someone tampering with the request — gets accepted as a
-  // final vote and permanently locks that person out with only part of
-  // their ballot recorded.
+  // Require a complete ballot — a selection for every contested position.
+  // Partial submissions are never accepted as final (see cast_ballot(): the
+  // claim + insert happen in one transaction, so there's no half-recorded
+  // state to clean up afterward either).
   const contestedPositions = positions.filter((p) => candidates.some((c) => c.position_id === p.id));
   const rows = [];
   for (const [positionId, candidateId] of Object.entries(selections)) {
@@ -78,41 +87,48 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Please make a selection for every position before submitting.' });
   }
 
-  // Atomic claim: only succeeds if this student hadn't already voted.
-  const { data: claimed, error: claimError } = await admin
+  const { error: castError } = await admin.rpc('cast_ballot', {
+    p_election_id: election_id,
+    p_computer_number: computer_number,
+    p_selections: rows,
+  });
+
+  if (castError) {
+    if (castError.message?.includes('ALREADY_VOTED')) {
+      return res.status(409).json({ error: 'This computer number has already voted' });
+    }
+    return res.status(500).json({ error: 'Failed to record vote' });
+  }
+
+  await logVoterEvent(admin, { electionId: election_id, computerNumber: computer_number, eventType: 'ballot_cast', ipAddress: ip, userAgent });
+
+  // Confirmation email — looked up fresh from students by computer number,
+  // never from the vote itself (the vote carries no voter-identifying
+  // column). A failed send must never block or roll back the vote above.
+  const { data: student } = await admin
     .from('students')
-    .update({ has_voted: true, voted_at: new Date().toISOString() })
-    .eq('id', student_id)
+    .select('email')
     .eq('election_id', election_id)
-    .eq('has_voted', false)
-    .select('id, computer_number')
+    .eq('computer_number', computer_number)
     .maybeSingle();
 
-  if (claimError) {
-    return res.status(500).json({ error: 'Failed to record vote' });
+  if (student?.email) {
+    const castAt = new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    const sendResult = await sendEmail({
+      to: student.email,
+      subject: `Ballot confirmation — ${election.name}`,
+      text: `A ballot was cast under your student number in ${election.name} at ${castAt}. If this was not you, reply to alerts@ballotoszm.com immediately.`,
+      html: `<p>A ballot was cast under your student number in <strong>${election.name}</strong> at ${castAt}.</p><p>If this was not you, reply to alerts@ballotoszm.com immediately.</p>`,
+    });
+    await logVoterEvent(admin, {
+      electionId: election_id,
+      computerNumber: computer_number,
+      eventType: sendResult.success ? 'ballot_notice_sent' : 'ballot_notice_failed',
+      ipAddress: ip,
+      userAgent,
+      reason: sendResult.success ? null : sendResult.error,
+    });
   }
-  if (!claimed) {
-    return res.status(409).json({ error: 'This computer number has already voted' });
-  }
-
-  const { error: voteError } = await admin.from('votes').insert({
-    election_id,
-    student_id: claimed.id,
-    computer_number: claimed.computer_number,
-    station_name: 'Online',
-    channel: 'online',
-    selections: rows,
-  });
-  if (voteError) {
-    return res.status(500).json({ error: 'Failed to record vote' });
-  }
-
-  await admin.from('audit_logs').insert({
-    election_id,
-    actor: 'system',
-    action: `Online vote submitted by ${claimed.computer_number}`,
-    category: 'vote',
-  });
 
   return res.status(200).json({ success: true });
 }

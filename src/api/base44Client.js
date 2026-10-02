@@ -316,4 +316,28 @@ const users = {
   },
 };
 
-export const base44 = { entities, auth, integrations, users };
+// ---------------------------------------------------------------------------
+// voterVerification.resetVoter — admin-only reset of a locked voter's
+// verification code, required-reason, server-validated and audit-logged.
+// ---------------------------------------------------------------------------
+
+const voterVerification = {
+  async resetVoter(electionId, computerNumber, reason) {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${API_BASE}/api/admin-reset-voter`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token || ''}`,
+      },
+      body: JSON.stringify({ election_id: electionId, computer_number: computerNumber, reason }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Failed to reset voter');
+    }
+    return res.json();
+  },
+};
+
+export const base44 = { entities, auth, integrations, users, voterVerification };
