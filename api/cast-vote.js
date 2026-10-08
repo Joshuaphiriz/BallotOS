@@ -6,7 +6,7 @@
 // body, so a tampered body can't target a different voter or election.
 import { createClient } from '@supabase/supabase-js';
 import { verifyTurnstile } from './_lib/turnstile.js';
-import { verifyVotingPass, getClientIp, getUserAgent } from './_lib/verification.js';
+import { verifyVotingPass, maskEmail, getClientIp, getUserAgent } from './_lib/verification.js';
 import { sendEmail } from './_lib/resend.js';
 import { logVoterEvent } from './_lib/voterAuditLog.js';
 
@@ -111,6 +111,19 @@ export default async function handler(req, res) {
     .eq('election_id', election_id)
     .eq('computer_number', computer_number)
     .maybeSingle();
+
+  // General Audit Logs entry — same wording as before this feature existed,
+  // now also carrying who/where/how (never ballot content, which the vote
+  // itself doesn't hold either).
+  await admin.from('audit_logs').insert({
+    election_id,
+    actor: 'system',
+    action: `Online vote submitted by ${computer_number}`,
+    category: 'vote',
+    voter_email: student?.email ? maskEmail(student.email) : null,
+    ip_address: ip,
+    user_agent: userAgent,
+  });
 
   if (student?.email) {
     const castAt = new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
