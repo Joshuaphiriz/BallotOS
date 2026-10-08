@@ -2,8 +2,13 @@
 // Public, no login. Step 2 of the verified-voting flow: checks the 6-digit
 // code, invalidates it after 2 wrong attempts, and on success issues a
 // short-lived signed voting pass (never a database session) for cast-vote.js.
+//
+// No Turnstile here by design (it IS required on request-code and
+// cast-vote): a 6-digit code already has a 1-in-a-million guess space and
+// is burned after 2 wrong attempts, forcing a fresh emailed code to try
+// again — Turnstile on top of that mainly added friction and a second
+// widget on the page, with no meaningful anti-abuse gain.
 import { createClient } from '@supabase/supabase-js';
-import { verifyTurnstile } from './_lib/turnstile.js';
 import { hashCode, issueVotingPass, getClientIp, getUserAgent } from './_lib/verification.js';
 import { logVoterEvent } from './_lib/voterAuditLog.js';
 
@@ -26,18 +31,13 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Server is missing Supabase service role configuration' });
   }
 
-  const { election_id, computer_number, code, turnstileToken } = req.body || {};
+  const { election_id, computer_number, code } = req.body || {};
   if (!election_id || !computer_number || !code) {
     return res.status(400).json({ error: 'election_id, computer_number and code are required' });
   }
   const computerNumber = computer_number.trim();
   const ip = getClientIp(req);
   const userAgent = getUserAgent(req);
-
-  const captcha = await verifyTurnstile(turnstileToken, ip);
-  if (!captcha.success) {
-    return res.status(400).json({ status: 'captcha_failed', error: captcha.reason });
-  }
 
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },

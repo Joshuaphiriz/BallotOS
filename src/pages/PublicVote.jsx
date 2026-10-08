@@ -150,14 +150,14 @@ export default function PublicVote() {
 
   const verifyCode = async (e) => {
     e.preventDefault();
-    if (!code.trim() || !codeToken) return;
+    if (code.trim().length !== 6) return;
     setVerifying(true);
     setCodeStatus(null);
     try {
       const res = await fetch(`${API_BASE}/api/verify-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ election_id: electionId, computer_number: number.trim(), code: code.trim(), turnstileToken: codeToken }),
+        body: JSON.stringify({ election_id: electionId, computer_number: number.trim(), code: code.trim() }),
       });
       const body = await res.json();
       if (body.status === 'accepted') {
@@ -170,7 +170,6 @@ export default function PublicVote() {
     } catch {
       setCodeStatus({ status: 'error' });
     }
-    setCodeToken(null);
     setCode('');
     setVerifying(false);
   };
@@ -275,8 +274,7 @@ export default function PublicVote() {
               inputMode="numeric"
               className="rounded-xl h-14 text-2xl font-mono text-center tracking-[0.3em]"
             />
-            <Turnstile onVerify={setCodeToken} onExpire={() => setCodeToken(null)} />
-            <Button type="submit" disabled={verifying || code.length !== 6 || !codeToken} className="w-full rounded-xl h-14 text-base" style={{ background: 'var(--ems-primary)' }}>
+            <Button type="submit" disabled={verifying || code.length !== 6} className="w-full rounded-xl h-14 text-base" style={{ background: 'var(--ems-primary)' }}>
               {verifying ? 'Checking…' : 'Verify code'}
             </Button>
           </form>
@@ -285,11 +283,14 @@ export default function PublicVote() {
             <StatusCard icon={ShieldAlert} tone="red" title="Code not accepted" desc={(CODE_MESSAGES[codeStatus.status] || CODE_MESSAGES.error)(codeStatus)} />
           )}
 
-          <div className="mt-6 text-center">
+          {/* Turnstile only guards the replacement-code request below (it
+              goes through request-code.js, same as the entry screen) — not
+              the Verify button above, which needs no CAPTCHA of its own. */}
+          <div className="mt-6 flex flex-col items-center gap-2">
+            <Turnstile onVerify={setCodeToken} onExpire={() => setCodeToken(null)} />
             <button type="button" disabled={requesting || !codeToken} onClick={requestReplacementCode} className="text-sm text-slate-500 underline disabled:opacity-50">
               {requesting ? 'Sending…' : "Didn't get a code? Send a new one"}
             </button>
-            {!codeToken && <p className="text-xs text-slate-400 mt-1">Complete the verification above first.</p>}
           </div>
 
           <div className="mt-2 text-center">
