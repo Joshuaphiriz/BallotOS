@@ -36,7 +36,7 @@ export default function Ballot({ election, student, positions, candidates, onSub
       <div className="rounded-2xl p-6 mb-8 text-white" style={{ background: 'var(--ems-primary)' }}>
         <p className="text-sm opacity-80">{election.association_name}</p>
         <h1 className="text-2xl font-semibold">{election.name}</h1>
-        <p className="mt-2 text-sm opacity-90">Voting as {student.full_name} · {student.computer_number}</p>
+        <p className="mt-2 text-sm opacity-90">Voting as {student.full_name ? `${student.full_name} · ` : ''}{student.computer_number}</p>
       </div>
 
       {positions.map(p => (

@@ -1,4 +1,4 @@
-// Shared by check-eligibility.js and cast-vote.js. Verifies a Cloudflare
+// Shared by request-code.js, verify-code.js and cast-vote.js. Verifies a Cloudflare
 // Turnstile token server-side — this is the real anti-bot check; the widget
 // in the browser only produces the token, it proves nothing on its own.
 export async function verifyTurnstile(token, remoteIp) {

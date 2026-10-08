@@ -37,7 +37,7 @@ export default function AuditLogs() {
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60">
-              <tr>{['Time', 'Category', 'Action', 'Actor', 'Details'].map(h => <th key={h} className="text-left px-5 py-3 font-medium text-slate-600 dark:text-slate-400">{h}</th>)}</tr>
+              <tr>{['Time', 'Category', 'Action', 'Actor', 'Email', 'IP', 'Device', 'Details'].map(h => <th key={h} className="text-left px-5 py-3 font-medium text-slate-600 dark:text-slate-400">{h}</th>)}</tr>
             </thead>
             <tbody>
               {filtered.map(l => (
@@ -46,6 +46,9 @@ export default function AuditLogs() {
                   <td className="px-5 py-3"><Badge variant="secondary" className="rounded-lg capitalize">{l.category}</Badge></td>
                   <td className="px-5 py-3 text-slate-900 dark:text-white">{l.action}</td>
                   <td className="px-5 py-3 text-slate-500">{l.actor}</td>
+                  <td className="px-5 py-3 text-slate-500">{l.voter_email || '—'}</td>
+                  <td className="px-5 py-3 text-slate-500 font-mono text-xs">{l.ip_address || '—'}</td>
+                  <td className="px-5 py-3 text-slate-500 text-xs max-w-[200px] truncate" title={l.user_agent}>{l.user_agent || '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{l.details}</td>
                 </tr>
               ))}

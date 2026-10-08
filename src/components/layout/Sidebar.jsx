@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Vote, Wand2, Users, UserSquare2, ListOrdered, MonitorSmartphone,
-  BarChart3, FileText, Archive, Palette, ScrollText, ShieldCheck, Settings
+  BarChart3, FileText, Archive, Palette, ScrollText, Settings, KeyRound
 } from 'lucide-react';
 import { can } from '@/lib/ems';
 
@@ -21,6 +21,7 @@ const NAV = [
   { to: '/branding', label: 'Branding', icon: Palette, cap: 'manage' },
   { to: '/settings', label: 'Settings', icon: Settings, cap: 'manage' },
   { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText, cap: 'logs' },
+  { to: '/voter-verification', label: 'Voter Verification', icon: KeyRound, cap: 'logs' },
 ];
 
 export default function Sidebar({ user, election }) {
