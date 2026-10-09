@@ -1,9 +1,10 @@
 import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
-import { HashRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import Landing from '@/pages/Landing';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ScrollToTop from './components/ScrollToTop';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -32,6 +33,24 @@ import AuditLogs from '@/pages/AuditLogs';
 import VoterVerificationLog from '@/pages/VoterVerificationLog';
 import StationSetup from '@/pages/StationSetup';
 import PublicVote from '@/pages/PublicVote';
+
+// The Electron desktop app always identifies itself in its user agent —
+// it never shows the public landing page, even when signed out, matching
+// its existing straight-to-login behavior.
+const isElectron = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
+
+// Root ("/") only: show the public landing page to signed-out web visitors
+// instead of bouncing them to /login — every other protected route still
+// redirects to /login exactly as before (this component is only reached
+// at all once ProtectedRoute has already determined the visitor is signed
+// out, so it never runs for an authenticated session).
+function UnauthenticatedGate() {
+  const location = useLocation();
+  if (!isElectron && location.pathname === '/') {
+    return <Landing />;
+  }
+  return <Navigate to="/login" replace />;
+}
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -65,7 +84,7 @@ const AuthenticatedApp = () => {
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
+      <Route element={<ProtectedRoute unauthenticatedElement={<UnauthenticatedGate />} />}>
         {/* Polling assistant station selection (protected) */}
         <Route path="/station-setup" element={<StationSetup />} />
         {/* Admin + Observer shell — each route guarded by capability */}
